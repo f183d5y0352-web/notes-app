@@ -1,2 +1,2 @@
-APP_URL=<url_aplikasi>
+APP_URL= https://amazing-hotteok-33a2a8.netlify.app/
 MAP_SERVICE_API_KEY=<api_key>
