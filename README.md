@@ -1,6 +1,6 @@
 # App Starter Project with Webpack
 
-Proyek ini adalah setup dasar untuk aplikasi web yang menggunakan webpack untuk proses bundling, Babel untuk transpile JavaScript, serta mendukung proses build dan serving aplikasi.
+Proyek ini adalah setup dasar untuk aplikasi web yang menggunakan webpack untuk proses bundling, Babel untuk transpile JavaScrdipt, serta mendukung proses build dan serving aplikasi.
 
 ## Table of Contents
 
