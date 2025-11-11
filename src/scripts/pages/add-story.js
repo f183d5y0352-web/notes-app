@@ -29,6 +29,7 @@ class AddStoryPage {
 
             <fieldset class="form-group">
               <legend class="required-label">Photo</legend>
+              <!-- EXPLICIT label associated with file input -->
               <label for="photo" class="sr-only">Upload photo</label>
               <div class="photo-input-container">
                 <input 
@@ -262,7 +263,26 @@ class AddStoryPage {
           const result = await response.json();
 
           if (!result.error) {
-            this.#showStatus('success', 'Story shared successfully!');
+            // TAMBAHKAN: Tanyakan user apakah ingin simpan ke offline storage
+            const shouldSaveOffline = confirm('Story shared successfully! Save to offline storage?');
+            
+            if (shouldSaveOffline) {
+              const storyData = {
+                id: result.data?.addedStory?.id || `story-${Date.now()}`,
+                name: description.value.substring(0, 30),
+                description: description.value,
+                photoUrl: result.data?.addedStory?.photoUrl,
+                lat: this.#selectedLocation?.lat,
+                lon: this.#selectedLocation?.lng,
+                createdAt: new Date().toISOString()
+              };
+              
+              await IdbHelper.saveStory(storyData);
+              this.#showStatus('success', 'Story saved to offline storage too!');
+            } else {
+              this.#showStatus('success', 'Story shared successfully!');
+            }
+            
             setTimeout(() => {
               window.location.hash = '#/';
             }, 1500);
@@ -272,20 +292,22 @@ class AddStoryPage {
             submitButton.textContent = 'Share Story';
           }
         } else {
+          // OFFLINE: Simpan ke pending stories (user-controlled nantinya)
           const story = {
             description: description.value,
             photo: photoInput.files[0],
-            lat: this.#selectedLocation.lat,
-            lon: this.#selectedLocation.lng,
+            lat: this.#selectedLocation?.lat,
+            lon: this.#selectedLocation?.lng,
             timestamp: Date.now()
           };
           await IdbHelper.savePendingStory(story);
-          this.#showStatus('info', 'Story saved and will be uploaded when online');
+          this.#showStatus('success', 'Story saved offline. Will sync when online.');
           setTimeout(() => {
             window.location.hash = '#/';
           }, 1500);
         }
       } catch (error) {
+        console.error('Error:', error);
         this.#showStatus('error', 'Network error. Please try again.');
         submitButton.disabled = false;
         submitButton.textContent = 'Share Story';

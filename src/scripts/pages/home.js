@@ -125,11 +125,27 @@ class HomePage {
       });
     }
 
-    // Set new highlight and open popup
+    // Set new highlight and open popup with smooth animation
     this.#markers.eachLayer((layer) => {
       if (layer.options.storyId === storyId) {
+        // Add animation class to marker
+        const markerElement = layer.getElement();
+        if (markerElement) {
+          markerElement.classList.add('marker-highlight');
+        }
+
+        // Smooth fly to location (3 second animation)
+        this.#map.flyTo(layer.getLatLng(), 13, {
+          duration: 3, // 3 detik untuk animasi
+          easeLinearity: 0.25
+        });
+
+        // Open popup after a brief delay for smoother effect
+        setTimeout(() => {
+          layer.openPopup();
+        }, 500);
+
         layer.setIcon(this.#getHighlightedIcon());
-        layer.openPopup(); // This will show the popup automatically
       }
     });
 
@@ -179,7 +195,29 @@ class HomePage {
     const savedStories = await IdbHelper.getAllStories();
     const savedIds = new Set(savedStories.map(s => String(s.id)));
 
+    // Clear existing markers
+    this.#markers.clearLayers();
+
     this.#stories.forEach(story => {
+      // ADD MARKERS TO MAP
+      if (story.lat && story.lon) {
+        const marker = L.marker([story.lat, story.lon], {
+          icon: this.#getDefaultIcon(),
+          storyId: story.id
+        });
+
+        marker.bindPopup(`
+          <div class="map-popup">
+            <h3>${story.name}</h3>
+            <img src="${story.photoUrl}" alt="${story.description}" style="width: 100%; height: 150px; object-fit: cover; border-radius: 4px; margin-bottom: 8px;">
+            <small style="color: #666;">📅 ${new Date(story.createdAt).toLocaleDateString()}</small>
+          </div>
+        `);
+
+        marker.addTo(this.#markers);
+      }
+
+      // EXISTING: Story list item rendering
       const storyElement = document.createElement('article');
       storyElement.className = 'story-item';
       storyElement.dataset.storyId = story.id;
@@ -204,7 +242,6 @@ class HomePage {
 
       const saveBtn = storyElement.querySelector('.save-story');
 
-      // tandai sebagai saved bila sudah ada di IndexedDB
       if (savedIds.has(String(story.id))) {
         saveBtn.classList.add('saved');
         saveBtn.disabled = true;
@@ -218,6 +255,7 @@ class HomePage {
         saveBtn.disabled = true;
         saveBtn.innerHTML = `<span class="icon spinner" aria-hidden="true"></span><span class="text">Saving...</span>`;
         try {
+          // USER MEMILIH untuk simpan story ini ke IndexedDB
           await IdbHelper.saveStory({
             id: story.id,
             name: story.name,
@@ -228,7 +266,6 @@ class HomePage {
             createdAt: story.createdAt
           });
 
-          // update UI ke saved
           saveBtn.classList.add('saved');
           saveBtn.innerHTML = `<span class="icon">✔</span><span class="text">Saved</span>`;
           this.#showNotification('Saved', 'Story disimpan secara lokal', 'success');
@@ -240,7 +277,6 @@ class HomePage {
         }
       });
 
-      // existing delete handler should still work (ensure delete removes from idb too)
       const deleteBtn = storyElement.querySelector('.delete-story');
       deleteBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
@@ -248,7 +284,6 @@ class HomePage {
         if (!confirm('Delete this story from local DB?')) return;
         try {
           await IdbHelper.deleteStory(id);
-          // also remove from UI list
           storyElement.remove();
           this.#showNotification('Deleted', 'Story removed from local database', 'success');
         } catch (err) {
@@ -257,12 +292,17 @@ class HomePage {
         }
       });
 
-      // click on story centers map + opens popup as before
       storyElement.addEventListener('click', (e) => {
         if (e.target.closest('.save-story') || e.target.closest('.delete-story')) return;
         if (story.lat && story.lon) {
-          this.#map.setView([story.lat, story.lon], 13);
+          // Smooth animation handled in #highlightMarker
           this.#highlightMarker(story.id);
+          
+          // Add active class untuk visual feedback
+          document.querySelectorAll('.story-item').forEach(item => {
+            item.classList.remove('active');
+          });
+          storyElement.classList.add('active');
         }
       });
 
