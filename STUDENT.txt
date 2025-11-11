@@ -1,2 +1,2 @@
-APP_URL= https://amazing-hotteok-33a2a8.netlify.app/
+APP_URL= https://euphonious-croissant-56bd40.netlify.app/
 MAP_SERVICE_API_KEY=<api_key>
