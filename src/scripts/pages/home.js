@@ -158,169 +158,111 @@ class HomePage {
   async #loadStories() {
     try {
       const response = await fetch('https://story-api.dicoding.dev/v1/stories', {
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem('token')}`
-        }
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
       });
-
-      if (!response.ok) {
-        throw new Error('Network response was not ok');
-      }
-
-      const { listStory } = await response.json();
+      const data = await response.json();
+      this.#stories = data.listStory || [];
       
-      // Save stories to IndexedDB
-      await Promise.all(listStory.map(story => StoryIdb.saveStory(story)));
-      this.#stories = listStory;
+      // REMOVE automatic saving of all fetched stories to IndexedDB
+      // await Promise.all(this.#stories.map(story => IdbHelper.saveStory(story)));
     } catch (error) {
-      console.log('Loading from IndexedDB due to:', error);
-      // Load from IndexedDB if network fails
-      this.#stories = await StoryIdb.getAllStories();
+      // fallback: load saved stories from IndexedDB only when network fails
+      this.#stories = await IdbHelper.getAllStories();
     }
-    this.#renderStories();
   }
 
-  #renderStories() {
+  async #renderStories() {
     const storyList = document.getElementById('story-list');
     storyList.innerHTML = '';
 
-    // Clear existing markers
-    this.#markers.clearLayers();
+    // ambil semua saved ids sekali (opsional: lebih efisien)
+    const savedStories = await IdbHelper.getAllStories();
+    const savedIds = new Set(savedStories.map(s => String(s.id)));
 
     this.#stories.forEach(story => {
       const storyElement = document.createElement('article');
       storyElement.className = 'story-item';
-      // Add data attribute for story ID
       storyElement.dataset.storyId = story.id;
-      
+
       storyElement.innerHTML = `
-        <img src="${story.photoUrl}" alt="${story.description}">
+        <img src="${story.photoUrl || ''}" alt="${story.description || ''}">
         <div class="story-item-content">
-          <h2>${story.name}</h2>
-          <p>${story.description}</p>
+          <h2>${story.name || 'No name'}</h2>
+          <p>${story.description || ''}</p>
           <div class="story-meta">
-            <span class="story-date">${new Date(story.createdAt).toLocaleDateString()}</span>
-            ${story.lat && story.lon ? `
-              <span class="story-location">
-                <i class="fas fa-map-marker-alt"></i>
-                ${story.lat.toFixed(2)}, ${story.lon.toFixed(2)}
-              </span>
-            ` : ''}
+            <span class="story-date">${new Date(story.createdAt || Date.now()).toLocaleDateString()}</span>
+            ${story.lat && story.lon ? `<span class="story-location">${story.lat.toFixed(2)}, ${story.lon.toFixed(2)}</span>` : ''}
           </div>
-          <button class="delete-story" data-id="${story.id}">
-            <i class="fas fa-trash"></i> Delete
-          </button>
+          <div class="story-actions" role="group" aria-label="Story actions">
+            <button class="save-story" data-id="${story.id}" aria-label="Save story">
+              <span class="icon">💾</span><span class="text">Save</span>
+            </button>
+            <button class="delete-story" data-id="${story.id}" aria-label="Delete story">Delete</button>
+          </div>
         </div>
       `;
 
-      // Add markers for stories with locations
-      if (story.lat && story.lon) {
-        const marker = L.marker([story.lat, story.lon], {
-          icon: this.#getDefaultIcon(),
-          storyId: story.id
-        });
+      const saveBtn = storyElement.querySelector('.save-story');
 
-        // Add popup content with simpler design
-        marker.bindPopup(`
-          <div class="map-popup">
-            <h3>${story.name}</h3>
-            <img src="${story.photoUrl}" alt="${story.description}">
-            <div class="popup-date">
-              <i class="far fa-calendar"></i> ${new Date(story.createdAt).toLocaleDateString()}
-            </div>
-          </div>
-        `).openPopup();
-
-        marker.addTo(this.#markers);
+      // tandai sebagai saved bila sudah ada di IndexedDB
+      if (savedIds.has(String(story.id))) {
+        saveBtn.classList.add('saved');
+        saveBtn.disabled = true;
+        saveBtn.innerHTML = `<span class="icon">✔</span><span class="text">Saved</span>`;
+        saveBtn.setAttribute('aria-pressed', 'true');
       }
 
-      // Add click handler for the whole story item
-      storyElement.addEventListener('click', (e) => {
-        // Ignore if delete button was clicked
-        if (e.target.closest('.delete-story')) return;
-        
-        if (story.lat && story.lon) {
-          // First center map on story location
-          this.#map.setView([story.lat, story.lon], 13);
-          
-          // Then highlight marker and show popup
-          this.#highlightMarker(story.id);
-          
-          // Add active class to story item
-          document.querySelectorAll('.story-item').forEach(item => {
-            item.classList.remove('active');
+      saveBtn.addEventListener('click', async (ev) => {
+        ev.stopPropagation();
+        if (saveBtn.disabled) return;
+        saveBtn.disabled = true;
+        saveBtn.innerHTML = `<span class="icon spinner" aria-hidden="true"></span><span class="text">Saving...</span>`;
+        try {
+          await IdbHelper.saveStory({
+            id: story.id,
+            name: story.name,
+            description: story.description,
+            photoUrl: story.photoUrl,
+            lat: story.lat,
+            lon: story.lon,
+            createdAt: story.createdAt
           });
-          storyElement.classList.add('active');
+
+          // update UI ke saved
+          saveBtn.classList.add('saved');
+          saveBtn.innerHTML = `<span class="icon">✔</span><span class="text">Saved</span>`;
+          this.#showNotification('Saved', 'Story disimpan secara lokal', 'success');
+        } catch (err) {
+          console.error('Save failed', err);
+          this.#showNotification('Error', 'Gagal menyimpan story', 'error');
+          saveBtn.disabled = false;
+          saveBtn.innerHTML = `<span class="icon">💾</span><span class="text">Save</span>`;
         }
       });
 
-      // Enhanced delete handler
-      const deleteButton = storyElement.querySelector('.delete-story');
-      deleteButton.addEventListener('click', async (e) => {
-        e.preventDefault();
+      // existing delete handler should still work (ensure delete removes from idb too)
+      const deleteBtn = storyElement.querySelector('.delete-story');
+      deleteBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
-        
+        const id = deleteBtn.dataset.id;
+        if (!confirm('Delete this story from local DB?')) return;
         try {
-          const storyId = deleteButton.dataset.id;
-          
-          // Show confirmation dialog
-          const isConfirmed = confirm('Are you sure you want to delete this story?');
-          if (!isConfirmed) return;
+          await IdbHelper.deleteStory(id);
+          // also remove from UI list
+          storyElement.remove();
+          this.#showNotification('Deleted', 'Story removed from local database', 'success');
+        } catch (err) {
+          console.error('Delete error', err);
+          this.#showNotification('Error', 'Failed to delete story', 'error');
+        }
+      });
 
-          // Disable button and show loading state
-          deleteButton.disabled = true;
-          deleteButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Deleting...';
-          
-          // Add deleting animation class
-          storyElement.classList.add('deleting');
-
-          // Delete from IndexedDB
-          await StoryIdb.deleteStory(storyId);
-          
-          // Try to delete from API if online
-          if (navigator.onLine) {
-            try {
-              const response = await fetch(`https://story-api.dicoding.dev/v1/stories/${storyId}`, {
-                method: 'DELETE',
-                headers: {
-                  'Authorization': `Bearer ${localStorage.getItem('token')}`
-                }
-              });
-
-              if (!response.ok) {
-                throw new Error('Failed to delete from API');
-              }
-            } catch (error) {
-              console.warn('Failed to delete from API:', error);
-              // Continue since we've already deleted from IndexedDB
-            }
-          }
-
-          // Remove from local array
-          this.#stories = this.#stories.filter(s => s.id !== storyId);
-          
-          // Remove marker if exists
-          this.#markers.eachLayer((layer) => {
-            if (layer.options.storyId === storyId) {
-              this.#markers.removeLayer(layer);
-            }
-          });
-
-          // Show success notification
-          this.#showNotification('Success', 'Story deleted successfully!', 'success');
-
-          // Remove element after animation
-          setTimeout(() => {
-            storyElement.remove();
-          }, 500);
-
-        } catch (error) {
-          console.error('Failed to delete story:', error);
-          this.#showNotification('Error', 'Failed to delete story. Please try again.', 'error');
-          
-          // Reset button state
-          deleteButton.disabled = false;
-          deleteButton.innerHTML = '<i class="fas fa-trash"></i> Delete';
+      // click on story centers map + opens popup as before
+      storyElement.addEventListener('click', (e) => {
+        if (e.target.closest('.save-story') || e.target.closest('.delete-story')) return;
+        if (story.lat && story.lon) {
+          this.#map.setView([story.lat, story.lon], 13);
+          this.#highlightMarker(story.id);
         }
       });
 

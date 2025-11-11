@@ -13,7 +13,6 @@ class AddStoryPage {
       <div class="container">
         <div class="add-story-form">
           <h1>Add New Story</h1>
-          
           <form id="addStoryForm" novalidate>
             <div class="form-group">
               <label for="description" class="required-label">Description</label>
@@ -30,6 +29,7 @@ class AddStoryPage {
 
             <fieldset class="form-group">
               <legend class="required-label">Photo</legend>
+              <label for="photo" class="sr-only">Upload photo</label>
               <div class="photo-input-container">
                 <input 
                   type="file" 
@@ -87,6 +87,7 @@ class AddStoryPage {
 
             <fieldset class="form-group">
               <legend class="required-label">Location</legend>
+              <label for="map" class="sr-only">Select location on map</label>
               <p class="map-instruction">Click on map to set location</p>
               <div 
                 id="map" 
@@ -197,16 +198,13 @@ class AddStoryPage {
     this.#map.on('click', (e) => {
       const { lat, lng } = e.latlng;
       
-      // Remove existing marker if any
       if (this.#marker) {
         this.#map.removeLayer(this.#marker);
       }
 
-      // Add new marker
       this.#marker = L.marker([lat, lng]).addTo(this.#map);
       this.#selectedLocation = { lat, lng };
       
-      // Show selected coordinates
       document.getElementById('selectedLocation').textContent = 
         `Selected: ${lat.toFixed(6)}, ${lng.toFixed(6)}`;
     });
@@ -218,12 +216,10 @@ class AddStoryPage {
     const submitButton = document.getElementById('submitButton');
     const description = document.getElementById('description');
 
-    // Live description validation
     description.addEventListener('input', () => {
       this.#validateDescription(description.value);
     });
 
-    // Photo validation on selection
     photoInput.addEventListener('change', (e) => {
       const file = e.target.files[0];
       if (file) {
@@ -234,8 +230,6 @@ class AddStoryPage {
 
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
-      
-      // Disable submit button while processing
       submitButton.disabled = true;
       submitButton.textContent = 'Sharing Story...';
       this.#showStatus('info', 'Uploading your story...');
@@ -257,7 +251,6 @@ class AddStoryPage {
         }
 
         if (navigator.onLine) {
-          // Online submission
           const response = await fetch('https://story-api.dicoding.dev/v1/stories', {
             method: 'POST',
             headers: {
@@ -279,7 +272,6 @@ class AddStoryPage {
             submitButton.textContent = 'Share Story';
           }
         } else {
-          // Offline submission
           const story = {
             description: description.value,
             photo: photoInput.files[0],

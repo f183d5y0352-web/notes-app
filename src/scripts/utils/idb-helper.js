@@ -116,7 +116,18 @@ const IdbHelper = {
         resolve(filteredStories);
       };
     });
-  }
+  },
+
+  async hasStory(id) {
+    const db = await this.openDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(this.OBJECT_STORE_NAME, 'readonly');
+      const store = tx.objectStore(this.OBJECT_STORE_NAME);
+      const req = store.get(id);
+      req.onsuccess = () => resolve(!!req.result);
+      req.onerror = () => reject(req.error);
+    });
+  },
 };
 
 export default IdbHelper;
