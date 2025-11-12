@@ -1,28 +1,77 @@
 const IdbHelper = {
-  DATABASE_NAME: 'story-app-db',
-  DATABASE_VERSION: 1,
-  OBJECT_STORE_NAME: 'stories',
-  SYNC_STORE_NAME: 'pending-stories',
+  DB_NAME: 'story-app-db',
+  STORE_NAME: 'stories',
+  VERSION: 1,
 
   async openDB() {
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open(this.DATABASE_NAME, this.DATABASE_VERSION);
+      const request = indexedDB.open(this.DB_NAME, this.VERSION);
 
       request.onerror = () => reject(request.error);
       request.onsuccess = () => resolve(request.result);
 
       request.onupgradeneeded = (event) => {
         const db = event.target.result;
-
-        // Create stories store
-        if (!db.objectStoreNames.contains(this.OBJECT_STORE_NAME)) {
-          db.createObjectStore(this.OBJECT_STORE_NAME, { keyPath: 'id' });
+        
+        // Create object stores jika belum ada
+        if (!db.objectStoreNames.contains(this.STORE_NAME)) {
+          db.createObjectStore(this.STORE_NAME, { keyPath: 'id' });
         }
 
-        // Create pending stories store
-        if (!db.objectStoreNames.contains(this.SYNC_STORE_NAME)) {
-          db.createObjectStore(this.SYNC_STORE_NAME, { keyPath: 'id', autoIncrement: true });
+        if (!db.objectStoreNames.contains('pending-stories')) {
+          db.createObjectStore('pending-stories', { keyPath: 'id' });
         }
+      };
+    });
+  },
+
+  async saveStory(story) {
+    const db = await this.openDB();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(this.STORE_NAME, 'readwrite');
+      const store = transaction.objectStore(this.STORE_NAME);
+      
+      // Pastikan story punya semua field yang diperlukan
+      const storyData = {
+        id: story.id,
+        name: story.name,
+        description: story.description,
+        photoUrl: story.photoUrl,
+        lat: story.lat,
+        lon: story.lon,
+        createdAt: story.createdAt,
+        savedAt: new Date().toISOString() // Tambahkan timestamp
+      };
+
+      const request = store.put(storyData);
+      
+      request.onsuccess = () => {
+        console.log('Story saved to IndexedDB:', storyData);
+        resolve(storyData);
+      };
+      
+      request.onerror = () => {
+        console.error('Error saving story:', request.error);
+        reject(request.error);
+      };
+    });
+  },
+
+  async deleteStory(id) {
+    const db = await this.openDB();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(this.STORE_NAME, 'readwrite');
+      const store = transaction.objectStore(this.STORE_NAME);
+      const request = store.delete(id);
+
+      request.onsuccess = () => {
+        console.log('Story deleted from IndexedDB:', id);
+        resolve();
+      };
+      
+      request.onerror = () => {
+        console.error('Error deleting story:', request.error);
+        reject(request.error);
       };
     });
   },
@@ -30,104 +79,91 @@ const IdbHelper = {
   async getAllStories() {
     const db = await this.openDB();
     return new Promise((resolve, reject) => {
-      const transaction = db.transaction(this.OBJECT_STORE_NAME, 'readonly');
-      const store = transaction.objectStore(this.OBJECT_STORE_NAME);
+      const transaction = db.transaction(this.STORE_NAME, 'readonly');
+      const store = transaction.objectStore(this.STORE_NAME);
       const request = store.getAll();
 
-      request.onerror = () => reject(request.error);
-      request.onsuccess = () => resolve(request.result);
+      request.onsuccess = () => {
+        console.log('All stories retrieved from IndexedDB:', request.result);
+        resolve(request.result);
+      };
+      
+      request.onerror = () => {
+        console.error('Error getting stories:', request.error);
+        reject(request.error);
+      };
     });
   },
 
-  async saveStory(story) {
+  async getStory(id) {
     const db = await this.openDB();
     return new Promise((resolve, reject) => {
-      const transaction = db.transaction(this.OBJECT_STORE_NAME, 'readwrite');
-      const store = transaction.objectStore(this.OBJECT_STORE_NAME);
-      const request = store.put(story);
+      const transaction = db.transaction(this.STORE_NAME, 'readonly');
+      const store = transaction.objectStore(this.STORE_NAME);
+      const request = store.get(id);
 
+      request.onsuccess = () => {
+        resolve(request.result);
+      };
+      
       request.onerror = () => reject(request.error);
-      request.onsuccess = () => resolve(request.result);
     });
   },
 
-  async deleteStory(id) {
+  async searchStories(query) {
     const db = await this.openDB();
-    return new Promise((resolve, reject) => {
-      const transaction = db.transaction(this.OBJECT_STORE_NAME, 'readwrite');
-      const store = transaction.objectStore(this.OBJECT_STORE_NAME);
-      const request = store.delete(id);
+    const allStories = await this.getAllStories();
+    
+    return allStories.filter(story =>
+      story.name.toLowerCase().includes(query.toLowerCase()) ||
+      story.description.toLowerCase().includes(query.toLowerCase())
+    );
+  },
 
-      request.onerror = () => reject(request.error);
-      request.onsuccess = () => resolve(request.result);
-    });
+  async hasStory(id) {
+    const story = await this.getStory(id);
+    return !!story;
   },
 
   async savePendingStory(story) {
     const db = await this.openDB();
     return new Promise((resolve, reject) => {
-      const transaction = db.transaction(this.SYNC_STORE_NAME, 'readwrite');
-      const store = transaction.objectStore(this.SYNC_STORE_NAME);
-      const request = store.add({ ...story, timestamp: Date.now() });
+      const transaction = db.transaction('pending-stories', 'readwrite');
+      const store = transaction.objectStore('pending-stories');
+      const request = store.put({
+        id: `pending-${Date.now()}`,
+        ...story,
+        createdAt: new Date().toISOString()
+      });
 
+      request.onsuccess = () => resolve();
       request.onerror = () => reject(request.error);
-      request.onsuccess = () => resolve(request.result);
     });
   },
 
   async getPendingStories() {
     const db = await this.openDB();
     return new Promise((resolve, reject) => {
-      const transaction = db.transaction(this.SYNC_STORE_NAME, 'readonly');
-      const store = transaction.objectStore(this.SYNC_STORE_NAME);
+      const transaction = db.transaction('pending-stories', 'readonly');
+      const store = transaction.objectStore('pending-stories');
       const request = store.getAll();
 
+      request.onsuccess = () => resolve(request.result || []);
       request.onerror = () => reject(request.error);
-      request.onsuccess = () => resolve(request.result);
     });
   },
 
   async deletePendingStory(id) {
     const db = await this.openDB();
     return new Promise((resolve, reject) => {
-      const transaction = db.transaction(this.SYNC_STORE_NAME, 'readwrite');
-      const store = transaction.objectStore(this.SYNC_STORE_NAME);
+      const transaction = db.transaction('pending-stories', 'readwrite');
+      const store = transaction.objectStore('pending-stories');
       const request = store.delete(id);
 
+      request.onsuccess = () => resolve();
       request.onerror = () => reject(request.error);
-      request.onsuccess = () => resolve(request.result);
     });
-  },
-
-  async searchStories(query) {
-    const db = await this.openDB();
-    return new Promise((resolve, reject) => {
-      const transaction = db.transaction(this.OBJECT_STORE_NAME, 'readonly');
-      const store = transaction.objectStore(this.OBJECT_STORE_NAME);
-      const request = store.getAll();
-
-      request.onerror = () => reject(request.error);
-      request.onsuccess = () => {
-        const stories = request.result;
-        const filteredStories = stories.filter(story => 
-          story.description.toLowerCase().includes(query.toLowerCase()) ||
-          story.name.toLowerCase().includes(query.toLowerCase())
-        );
-        resolve(filteredStories);
-      };
-    });
-  },
-
-  async hasStory(id) {
-    const db = await this.openDB();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(this.OBJECT_STORE_NAME, 'readonly');
-      const store = tx.objectStore(this.OBJECT_STORE_NAME);
-      const req = store.get(id);
-      req.onsuccess = () => resolve(!!req.result);
-      req.onerror = () => reject(req.error);
-    });
-  },
+  }
 };
 
 export default IdbHelper;

@@ -8,6 +8,7 @@ class HomePage {
   #map = null;
   #markers = new L.LayerGroup();
   #stories = [];
+  #allStories = []; // TAMBAHKAN: simpan data asli
   #activeMarkerId = null;
   
   async render() {
@@ -26,11 +27,25 @@ class HomePage {
         
         <div class="story-header">
           <div class="story-filters">
+            <!-- TAMBAHKAN: Search input -->
+            <input 
+              type="search" 
+              id="searchInput" 
+              class="story-search" 
+              placeholder="Search stories..."
+              aria-label="Search stories"
+            >
+            
             <select id="location-filter" aria-label="Filter stories by location">
               <option value="">All Locations</option>
             </select>
           </div>
           <div class="header-actions">
+            <!-- TAMBAHKAN: Saved Stories link -->
+            <a href="#/saved" class="saved-button" role="button" aria-label="View saved stories">
+              <i class="fas fa-star"></i> Saved Stories
+            </a>
+            
             <button id="notification-toggle" class="notification-button" title="${notificationTitle}" aria-label="${notificationTitle}">
               <i class="fas ${notificationIcon}"></i>
             </button>
@@ -177,13 +192,14 @@ class HomePage {
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
       });
       const data = await response.json();
-      this.#stories = data.listStory || [];
+      this.#allStories = data.listStory || []; // SIMPAN data asli
+      this.#stories = [...this.#allStories]; // Copy untuk display
       
-      // REMOVE automatic saving of all fetched stories to IndexedDB
-      // await Promise.all(this.#stories.map(story => IdbHelper.saveStory(story)));
+      console.log('Stories loaded:', this.#stories.length);
     } catch (error) {
       // fallback: load saved stories from IndexedDB only when network fails
       this.#stories = await IdbHelper.getAllStories();
+      this.#allStories = [...this.#stories];
     }
   }
 
@@ -191,15 +207,14 @@ class HomePage {
     const storyList = document.getElementById('story-list');
     storyList.innerHTML = '';
 
-    // ambil semua saved ids sekali (opsional: lebih efisien)
+    // Ambil semua saved stories dari IndexedDB
     const savedStories = await IdbHelper.getAllStories();
     const savedIds = new Set(savedStories.map(s => String(s.id)));
 
-    // Clear existing markers
     this.#markers.clearLayers();
 
     this.#stories.forEach(story => {
-      // ADD MARKERS TO MAP
+      // Add markers to map
       if (story.lat && story.lon) {
         const marker = L.marker([story.lat, story.lon], {
           icon: this.#getDefaultIcon(),
@@ -217,10 +232,13 @@ class HomePage {
         marker.addTo(this.#markers);
       }
 
-      // EXISTING: Story list item rendering
+      // Render story item
       const storyElement = document.createElement('article');
       storyElement.className = 'story-item';
       storyElement.dataset.storyId = story.id;
+      
+      // CEK: apakah story ini sudah disimpan di IndexedDB
+      const isSaved = savedIds.has(String(story.id));
 
       storyElement.innerHTML = `
         <img src="${story.photoUrl || ''}" alt="${story.description || ''}">
@@ -228,34 +246,36 @@ class HomePage {
           <h2>${story.name || 'No name'}</h2>
           <p>${story.description || ''}</p>
           <div class="story-meta">
-            <span class="story-date">${new Date(story.createdAt || Date.now()).toLocaleDateString()}</span>
-            ${story.lat && story.lon ? `<span class="story-location">${story.lat.toFixed(2)}, ${story.lon.toFixed(2)}</span>` : ''}
+            <span class="story-date">📅 ${new Date(story.createdAt || Date.now()).toLocaleDateString()}</span>
+            ${story.lat && story.lon ? `<span class="story-location">📍 ${story.lat.toFixed(2)}, ${story.lon.toFixed(2)}</span>` : ''}
           </div>
-          <div class="story-actions" role="group" aria-label="Story actions">
-            <button class="save-story" data-id="${story.id}" aria-label="Save story">
-              <span class="icon">💾</span><span class="text">Save</span>
+          <div class="story-actions" role="group">
+            <button class="save-story" data-id="${story.id}">
+              <span class="icon">💾</span><span class="text">${isSaved ? 'Saved' : 'Save'}</span>
             </button>
-            <button class="delete-story" data-id="${story.id}" aria-label="Delete story">Delete</button>
+            ${isSaved ? `<button class="delete-story" data-id="${story.id}"><span class="icon">🗑️</span><span class="text">Hapus</span></button>` : ''}
           </div>
         </div>
       `;
 
       const saveBtn = storyElement.querySelector('.save-story');
-
-      if (savedIds.has(String(story.id))) {
+      
+      // Set initial state: jika sudah disimpan
+      if (isSaved) {
         saveBtn.classList.add('saved');
         saveBtn.disabled = true;
         saveBtn.innerHTML = `<span class="icon">✔</span><span class="text">Saved</span>`;
-        saveBtn.setAttribute('aria-pressed', 'true');
       }
 
+      // SAVE HANDLER
       saveBtn.addEventListener('click', async (ev) => {
         ev.stopPropagation();
         if (saveBtn.disabled) return;
+        
         saveBtn.disabled = true;
-        saveBtn.innerHTML = `<span class="icon spinner" aria-hidden="true"></span><span class="text">Saving...</span>`;
+        saveBtn.innerHTML = `<span class="icon">⏳</span><span class="text">Saving...</span>`;
+
         try {
-          // USER MEMILIH untuk simpan story ini ke IndexedDB
           await IdbHelper.saveStory({
             id: story.id,
             name: story.name,
@@ -266,42 +286,49 @@ class HomePage {
             createdAt: story.createdAt
           });
 
+          // Update UI setelah save berhasil
           saveBtn.classList.add('saved');
           saveBtn.innerHTML = `<span class="icon">✔</span><span class="text">Saved</span>`;
-          this.#showNotification('Saved', 'Story disimpan secara lokal', 'success');
+          
+          // TAMBAHKAN tombol Delete SETELAH save berhasil
+          const storyActions = storyElement.querySelector('.story-actions');
+          if (!storyElement.querySelector('.delete-story')) {
+            const deleteBtn = document.createElement('button');
+            deleteBtn.className = 'delete-story';
+            deleteBtn.dataset.id = story.id;
+            deleteBtn.innerHTML = `<span class="icon">🗑️</span><span class="text">Hapus</span>`;
+            storyActions.appendChild(deleteBtn);
+            
+            // Attach delete handler ke tombol yang baru dibuat
+            this.#attachDeleteHandler(deleteBtn, story.id, storyElement, saveBtn);
+          }
+          
+          this.#showNotification('Saved', 'Story disimpan ke favorit', 'success');
         } catch (err) {
-          console.error('Save failed', err);
+          console.error('Save failed:', err);
           this.#showNotification('Error', 'Gagal menyimpan story', 'error');
           saveBtn.disabled = false;
           saveBtn.innerHTML = `<span class="icon">💾</span><span class="text">Save</span>`;
         }
       });
 
+      // DELETE HANDLER (hanya jika sudah disimpan)
       const deleteBtn = storyElement.querySelector('.delete-story');
-      deleteBtn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        const id = deleteBtn.dataset.id;
-        if (!confirm('Delete this story from local DB?')) return;
-        try {
-          await IdbHelper.deleteStory(id);
-          storyElement.remove();
-          this.#showNotification('Deleted', 'Story removed from local database', 'success');
-        } catch (err) {
-          console.error('Delete error', err);
-          this.#showNotification('Error', 'Failed to delete story', 'error');
-        }
-      });
+      if (deleteBtn) {
+        this.#attachDeleteHandler(deleteBtn, story.id, storyElement, saveBtn);
+      }
 
+      // Click to highlight on map
       storyElement.addEventListener('click', (e) => {
         if (e.target.closest('.save-story') || e.target.closest('.delete-story')) return;
         if (story.lat && story.lon) {
-          // Smooth animation handled in #highlightMarker
+          this.#map.flyTo([story.lat, story.lon], 13, {
+            duration: 3,
+            easeLinearity: 0.25
+          });
           this.#highlightMarker(story.id);
           
-          // Add active class untuk visual feedback
-          document.querySelectorAll('.story-item').forEach(item => {
-            item.classList.remove('active');
-          });
+          document.querySelectorAll('.story-item').forEach(item => item.classList.remove('active'));
           storyElement.classList.add('active');
         }
       });
@@ -404,32 +431,29 @@ class HomePage {
   }
 
   #setupSearch() {
-    const searchInput = document.createElement('input');
-    searchInput.type = 'search';
-    searchInput.placeholder = 'Search stories...';
-    searchInput.className = 'story-search';
-    
-    const filterContainer = document.querySelector('.story-filters');
-    filterContainer.prepend(searchInput);
+    const searchInput = document.getElementById('searchInput');
+    if (!searchInput) return;
 
     let searchTimeout;
+
     searchInput.addEventListener('input', (e) => {
       clearTimeout(searchTimeout);
-      searchTimeout = setTimeout(async () => {
-        try {
-          const query = e.target.value.trim();
-          if (query) {
-            this.#stories = await IdbHelper.searchStories(query);
-          } else {
-            // If search is empty, load all stories
-            await this.#loadStories();
-          }
-          this.#renderStories();
-        } catch (error) {
-          console.error('Search error:', error);
-          this.#showNotification('Error', 'Failed to search stories', 'error');
+      const query = e.target.value.trim().toLowerCase();
+
+      // Debounce: tunggu 300ms sebelum search
+      searchTimeout = setTimeout(() => {
+        if (query === '') {
+          // Reset ke semua stories
+          this.#stories = [...this.#allStories];
+        } else {
+          // Filter dari data asli
+          this.#stories = this.#allStories.filter(story =>
+            story.name.toLowerCase().includes(query) ||
+            story.description.toLowerCase().includes(query)
+          );
         }
-      }, 300); // Debounce search for better performance
+        this.#renderStories();
+      }, 300);
     });
   }
 
@@ -452,6 +476,36 @@ class HomePage {
       notification.classList.add('fade-out');
       setTimeout(() => notification.remove(), 300);
     }, 3000);
+  }
+
+  #attachDeleteHandler(deleteBtn, storyId, storyElement, saveBtn) {
+    deleteBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      
+      if (!confirm('Hapus story ini dari favorit?')) return;
+      
+      deleteBtn.disabled = true;
+      deleteBtn.innerHTML = `<span class="icon">⏳</span><span class="text">Menghapus...</span>`;
+
+      try {
+        await IdbHelper.deleteStory(storyId);
+        
+        // HAPUS tombol Delete setelah berhasil
+        deleteBtn.remove();
+        
+        // RESET save button
+        saveBtn.classList.remove('saved');
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = `<span class="icon">💾</span><span class="text">Save</span>`;
+        
+        this.#showNotification('Deleted', 'Story dihapus dari favorit', 'success');
+      } catch (err) {
+        console.error('Delete error:', err);
+        this.#showNotification('Error', 'Gagal menghapus story', 'error');
+        deleteBtn.disabled = false;
+        deleteBtn.innerHTML = `<span class="icon">🗑️</span><span class="text">Hapus</span>`;
+      }
+    });
   }
 }
 
